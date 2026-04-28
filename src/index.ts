@@ -10,6 +10,7 @@ import { listingsRouter } from './routes/listings.ts';
 import { applicationsRouter } from './routes/applications.ts';
 import { coverLettersRouter } from './routes/cover-letters.ts';
 import { eventsRouter } from './routes/events.ts';
+import { importRouter } from './routes/import.ts';
 import { reportsRouter } from './routes/reports.ts';
 
 const app = express();
@@ -32,6 +33,7 @@ v1.use('/listings', listingsRouter);
 v1.use('/applications', applicationsRouter);
 v1.use('/', coverLettersRouter);
 v1.use('/', eventsRouter);
+v1.use('/', importRouter);
 v1.use('/reports', reportsRouter);
 app.use('/api/v1', v1);
 

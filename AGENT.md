@@ -191,6 +191,67 @@ Read-side. Lists application + joined listing fields, ordered by `updated_at DES
 
 Full detail: application + all status_change/pause_gate/etc. events + all cover letter versions.
 
+### POST `/applications/import` — bulk backfill historical applications
+
+Use this to load applications that were submitted before this API existed (or from
+another tracker, like a Drive CSV). Bypasses the status machine — set the final
+status directly. Idempotent on `(user, indeed_job_id)` — duplicates are reported
+in `skipped`, not errored.
+
+```bash
+curl -fsS -X POST http://192.168.50.118:3014/api/v1/applications/import \
+  -H 'content-type: application/json' \
+  -d '{
+    "source": "drive_csv_2026-04-28",
+    "applications": [
+      {
+        "indeed_job_id": "old-12345",
+        "title": "Senior Platform Engineer",
+        "company": "Acme",
+        "apply_url": "https://www.indeed.com/viewjob?jk=old-12345",
+        "location": "Remote",
+        "status": "submitted",
+        "applied_at": "2026-03-15T10:00:00Z",
+        "fit_score": 80,
+        "fit_reasoning": "k8s + observability match",
+        "cover_letter_md": "Dear team..."
+      },
+      {
+        "indeed_job_id": "old-67890",
+        "title": "SRE",
+        "company": "Beta Inc",
+        "apply_url": "https://www.indeed.com/viewjob?jk=old-67890",
+        "status": "rejected",
+        "applied_at": "2026-03-20T14:30:00Z",
+        "responded_at": "2026-04-02T09:00:00Z",
+        "closed_at": "2026-04-02T09:00:00Z"
+      }
+    ]
+  }'
+```
+
+Returns:
+
+```json
+{
+  "summary": {"requested": 2, "created": 2, "skipped": 0},
+  "created": [
+    {"indeed_job_id": "old-12345", "application_id": "...", "status": "submitted"},
+    {"indeed_job_id": "old-67890", "application_id": "...", "status": "rejected"}
+  ],
+  "skipped": []
+}
+```
+
+Each imported app gets two events written: `imported` (with `source`) and an
+initial `status_change` (`from: null, to: <status>, reason: "backfill"`).
+
+**Limits:** up to 500 apps per call. For larger batches, chunk it.
+
+**Required listing fields:** `indeed_job_id`, `title`, `company`, `apply_url`. Everything else is optional.
+
+**Status defaults:** if you omit `applied_at` but set `status` to `submitted`/`responded`/`rejected`/`offer`, `applied_at` is stamped to NOW(). Same for `closed_at` on `rejected`/`withdrawn`.
+
 ### GET `/reports/funnel`
 
 ```json
