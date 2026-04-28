@@ -1,6 +1,7 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { env } from './lib/env.ts';
 import { logger } from './lib/logger.ts';
 import { db } from './db/client.ts';
@@ -40,14 +41,16 @@ v1.use('/', importRouter);
 v1.use('/reports', reportsRouter);
 app.use('/api/v1', v1);
 
-// MCP endpoint (Streamable HTTP). Stateless — every request creates a fresh
-// transport; the server treats each call as independent.
+// MCP endpoint (Streamable HTTP, stateful). Sessions are keyed by the
+// `mcp-session-id` header issued during initialize. Subsequent POST/GET/DELETE
+// on /mcp must include that header.
 //
 // Auth: when JOB_HUNT_API_TOKEN is set, MCP requests must send
 //   Authorization: Bearer <token>
 // When the token is unset (single-user local dev), the endpoint is open —
 // same model as the REST API.
 const mcpServer = buildMcpServer();
+const mcpTransports = new Map<string, StreamableHTTPServerTransport>();
 
 function mcpAuthOk(req: express.Request): boolean {
   if (!env.JOB_HUNT_API_TOKEN) return true;
@@ -55,7 +58,7 @@ function mcpAuthOk(req: express.Request): boolean {
   return m !== null && m[1].trim() === env.JOB_HUNT_API_TOKEN;
 }
 
-app.all('/mcp', async (req, res) => {
+async function handleMcp(req: express.Request, res: express.Response): Promise<void> {
   if (!mcpAuthOk(req)) {
     res.status(401).json({
       jsonrpc: '2.0',
@@ -64,13 +67,44 @@ app.all('/mcp', async (req, res) => {
     });
     return;
   }
-  try {
-    const transport = new StreamableHTTPServerTransport({
+
+  const sessionId = req.header('mcp-session-id');
+  let transport: StreamableHTTPServerTransport | undefined;
+
+  if (sessionId && mcpTransports.has(sessionId)) {
+    transport = mcpTransports.get(sessionId);
+  } else if (!sessionId && req.method === 'POST' && isInitializeRequest(req.body)) {
+    transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id) => {
+        if (transport) {
+          mcpTransports.set(id, transport);
+          logger.debug({ sessionId: id }, 'MCP session initialized');
+        }
+      },
     });
-    res.on('close', () => transport.close().catch(() => undefined));
+    transport.onclose = () => {
+      const id = transport?.sessionId;
+      if (id) {
+        mcpTransports.delete(id);
+        logger.debug({ sessionId: id }, 'MCP session closed');
+      }
+    };
     await mcpServer.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+  } else {
+    res.status(400).json({
+      jsonrpc: '2.0',
+      error: {
+        code: -32000,
+        message: 'Missing or invalid mcp-session-id header (and request is not initialize)',
+      },
+      id: null,
+    });
+    return;
+  }
+
+  try {
+    await transport!.handleRequest(req, res, req.body);
   } catch (err) {
     logger.error({ err }, 'MCP request handling failed');
     if (!res.headersSent) {
@@ -81,7 +115,11 @@ app.all('/mcp', async (req, res) => {
       });
     }
   }
-});
+}
+
+app.post('/mcp', handleMcp);
+app.get('/mcp', handleMcp);
+app.delete('/mcp', handleMcp);
 
 app.use(errorHandler);
 
