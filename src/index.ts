@@ -45,11 +45,13 @@ app.use('/api/v1', v1);
 // `mcp-session-id` header issued during initialize. Subsequent POST/GET/DELETE
 // on /mcp must include that header.
 //
+// One McpServer can only be connected to one transport, so we build a fresh
+// server per session.
+//
 // Auth: when JOB_HUNT_API_TOKEN is set, MCP requests must send
 //   Authorization: Bearer <token>
 // When the token is unset (single-user local dev), the endpoint is open —
 // same model as the REST API.
-const mcpServer = buildMcpServer();
 const mcpTransports = new Map<string, StreamableHTTPServerTransport>();
 
 function mcpAuthOk(req: express.Request): boolean {
@@ -90,7 +92,9 @@ async function handleMcp(req: express.Request, res: express.Response): Promise<v
         logger.debug({ sessionId: id }, 'MCP session closed');
       }
     };
-    await mcpServer.connect(transport);
+    // Fresh McpServer per session — the SDK only allows one transport per server.
+    const sessionServer = buildMcpServer();
+    await sessionServer.connect(transport);
   } else {
     res.status(400).json({
       jsonrpc: '2.0',
