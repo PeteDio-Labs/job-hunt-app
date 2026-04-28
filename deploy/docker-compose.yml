@@ -1,0 +1,49 @@
+services:
+  job-hunt-db:
+    image: postgres:16-alpine
+    container_name: job-hunt-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-job_hunt}
+      POSTGRES_USER: ${POSTGRES_USER:-job_hunt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - job-hunt-db-data:/var/lib/postgresql/data
+    networks:
+      - job-hunt
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-job_hunt} -d ${POSTGRES_DB:-job_hunt}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  job-hunt-app:
+    image: ${JOB_HUNT_IMAGE:-docker.toastedbytes.com/job-hunt-app:latest}
+    container_name: job-hunt-app
+    restart: unless-stopped
+    depends_on:
+      job-hunt-db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3014"
+      POSTGRES_HOST: job-hunt-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-job_hunt}
+      POSTGRES_USER: ${POSTGRES_USER:-job_hunt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # Optional. Leave unset to run open (single-user local mode).
+      JOB_HUNT_API_TOKEN: ${JOB_HUNT_API_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3014:3014"
+    networks:
+      - job-hunt
+
+networks:
+  job-hunt:
+    driver: bridge
+
+volumes:
+  job-hunt-db-data:
+    driver: local
