@@ -10,11 +10,32 @@ This guide is **only** about the job-hunt API. The Indeed and Chrome MCPs are do
 
 ---
 
-## Endpoint and auth
+## Two ways to talk to job-hunt
 
-- Base URL: `http://192.168.50.118:3014/api/v1`
+### A. As an MCP server (preferred for hosted agents like Cowork)
+
+- URL: `https://job-hunt.toastedbytes.com/mcp` (public, Cloudflare Tunnel → LAN)
+- Transport: Streamable HTTP (stateful sessions; the SDK client handles `mcp-session-id` automatically)
+- Auth: when `JOB_HUNT_API_TOKEN` is set on the server, send `Authorization: Bearer <token>`. Otherwise the endpoint is open (single-user local mode).
+- Tools: `search_create`, `listing_get`, `listing_update`, `application_create`, `application_status_update`, `cover_letter_create`, `event_create`, `applications_list`, `application_get`, `funnel_report`, `applications_import`. They mirror the REST endpoints below — same fields, same semantics.
+
+Cowork connector config:
+```json
+{
+  "name": "job-hunt",
+  "url": "https://job-hunt.toastedbytes.com/mcp",
+  "transport": "http",
+  "headers": { "Authorization": "Bearer <JOB_HUNT_API_TOKEN>" }
+}
+```
+
+(Drop the `headers` block when running in single-user open mode.)
+
+### B. As a plain REST API (for shell, curl, or local Claude Code)
+
+- Base URL: `http://192.168.50.118:3014/api/v1` (LAN-only)
 - Health: `http://192.168.50.118:3014/health`
-- Auth: **none right now** (single-user local mode). If `JOB_HUNT_API_TOKEN` is later set on the server, every request needs `Authorization: Bearer <token>`.
+- Auth: same `Authorization: Bearer <token>` rule when the token is set.
 
 All requests are JSON. All timestamps come back as ISO-8601 UTC. All IDs are UUIDs.
 
