@@ -486,14 +486,18 @@ export function buildMcpServer(): McpServer {
           fit_reasoning: z.string().nullish(),
           notes: z.string().nullish(),
           cover_letter_md: z.string().nullish(),
-          applied_at: z.coerce.date().nullish(),
-          responded_at: z.coerce.date().nullish(),
-          closed_at: z.coerce.date().nullish(),
+          // ISO-8601 strings (e.g. "2026-03-15T10:00:00Z"). Date objects can't
+          // be serialized to JSON Schema for MCP tool discovery.
+          applied_at: z.string().datetime({ offset: true }).nullish(),
+          responded_at: z.string().datetime({ offset: true }).nullish(),
+          closed_at: z.string().datetime({ offset: true }).nullish(),
         })).min(1).max(500),
       },
     },
     async ({ source, applications }) => {
       const userId = await defaultUserId();
+      const toDate = (s: string | null | undefined): Date | null =>
+        s ? new Date(s) : null;
       const result = await db.transaction(async (client) => {
         const created: Array<{ indeed_job_id: string; application_id: string; status: string }> = [];
         const skipped: Array<{ indeed_job_id: string; reason: string; existing_application_id?: string }> = [];
@@ -501,11 +505,15 @@ export function buildMcpServer(): McpServer {
         for (const item of applications) {
           const listing = await upsertListing(client, item);
 
+          const appliedAt = toDate(item.applied_at);
+          const respondedAt = toDate(item.responded_at);
+          const closedAt = toDate(item.closed_at);
+
           const inferredAppliedAt =
-            item.applied_at ??
+            appliedAt ??
             (['submitted', 'responded', 'rejected', 'offer'].includes(item.status) ? new Date() : null);
           const inferredClosedAt =
-            item.closed_at ??
+            closedAt ??
             (['rejected', 'withdrawn'].includes(item.status) ? new Date() : null);
 
           const ins = await client.query<{ id: string }>(
@@ -515,7 +523,7 @@ export function buildMcpServer(): McpServer {
             [
               userId, listing.id, item.status,
               item.fit_score ?? null, item.fit_reasoning ?? null, item.notes ?? null,
-              inferredAppliedAt, item.responded_at ?? null, inferredClosedAt,
+              inferredAppliedAt, respondedAt, inferredClosedAt,
             ],
           );
           if (ins.rowCount === 0) {
