@@ -16,6 +16,7 @@ import { eventsRouter } from './routes/events.ts';
 import { importRouter } from './routes/import.ts';
 import { reportsRouter } from './routes/reports.ts';
 import { buildMcpServer } from './mcp/server.ts';
+import { buildOAuthRouter, verifyAuthentikAccessToken } from './mcp/oauth.ts';
 
 const app = express();
 
@@ -41,32 +42,48 @@ v1.use('/', importRouter);
 v1.use('/reports', reportsRouter);
 app.use('/api/v1', v1);
 
+// Mount the OAuth proxy router (provides /.well-known/oauth-protected-resource,
+// /.well-known/oauth-authorization-server, /authorize, /token, /revoke).
+// All requests are proxied to Authentik. Mounted BEFORE /mcp so well-known
+// paths resolve first.
+app.use(buildOAuthRouter());
+
 // MCP endpoint (Streamable HTTP, stateful). Sessions are keyed by the
 // `mcp-session-id` header issued during initialize. Subsequent POST/GET/DELETE
 // on /mcp must include that header.
 //
-// One McpServer can only be connected to one transport, so we build a fresh
-// server per session.
-//
-// Auth: when JOB_HUNT_API_TOKEN is set, MCP requests must send
-//   Authorization: Bearer <token>
-// When the token is unset (single-user local dev), the endpoint is open —
-// same model as the REST API.
+// Auth: every request must carry an Authentik-issued JWT in
+//   Authorization: Bearer <jwt>
+// We validate against Authentik's JWKS via jose. On failure, return 401 with
+// a WWW-Authenticate header pointing clients at the protected-resource
+// metadata so MCP-aware clients (like claude.ai's Cowork connector) can
+// discover the OAuth dance.
 const mcpTransports = new Map<string, StreamableHTTPServerTransport>();
 
-function mcpAuthOk(req: express.Request): boolean {
-  if (!env.JOB_HUNT_API_TOKEN) return true;
-  const m = (req.header('authorization') ?? '').match(/^Bearer\s+(.+)$/i);
-  return m !== null && m[1].trim() === env.JOB_HUNT_API_TOKEN;
+function mcpUnauthorized(req: express.Request, res: express.Response, detail?: string): void {
+  const resourceMetadataUrl = `${env.PUBLIC_BASE_URL}/.well-known/oauth-protected-resource`;
+  res.setHeader(
+    'WWW-Authenticate',
+    `Bearer resource_metadata="${resourceMetadataUrl}"${detail ? `, error="invalid_token", error_description="${detail}"` : ''}`,
+  );
+  res.status(401).json({
+    jsonrpc: '2.0',
+    error: { code: -32001, message: 'unauthorized', data: { resourceMetadataUrl } },
+    id: null,
+  });
 }
 
 async function handleMcp(req: express.Request, res: express.Response): Promise<void> {
-  if (!mcpAuthOk(req)) {
-    res.status(401).json({
-      jsonrpc: '2.0',
-      error: { code: -32001, message: 'unauthorized' },
-      id: null,
-    });
+  const m = (req.header('authorization') ?? '').match(/^Bearer\s+(.+)$/i);
+  if (!m) {
+    mcpUnauthorized(req, res, 'missing bearer token');
+    return;
+  }
+  try {
+    await verifyAuthentikAccessToken(m[1].trim());
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'MCP auth verification failed');
+    mcpUnauthorized(req, res, (err as Error).message);
     return;
   }
 
