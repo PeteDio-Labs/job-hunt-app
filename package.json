@@ -12,6 +12,7 @@
     "typecheck": "bun tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.2.1",
     "pg": "^8.18.0",
     "pino": "^10.3.1",

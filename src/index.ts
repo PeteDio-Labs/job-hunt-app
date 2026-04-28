@@ -1,4 +1,6 @@
 import express from 'express';
+import { randomUUID } from 'node:crypto';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { env } from './lib/env.ts';
 import { logger } from './lib/logger.ts';
 import { db } from './db/client.ts';
@@ -12,6 +14,7 @@ import { coverLettersRouter } from './routes/cover-letters.ts';
 import { eventsRouter } from './routes/events.ts';
 import { importRouter } from './routes/import.ts';
 import { reportsRouter } from './routes/reports.ts';
+import { buildMcpServer } from './mcp/server.ts';
 
 const app = express();
 
@@ -36,6 +39,49 @@ v1.use('/', eventsRouter);
 v1.use('/', importRouter);
 v1.use('/reports', reportsRouter);
 app.use('/api/v1', v1);
+
+// MCP endpoint (Streamable HTTP). Stateless — every request creates a fresh
+// transport; the server treats each call as independent.
+//
+// Auth: when JOB_HUNT_API_TOKEN is set, MCP requests must send
+//   Authorization: Bearer <token>
+// When the token is unset (single-user local dev), the endpoint is open —
+// same model as the REST API.
+const mcpServer = buildMcpServer();
+
+function mcpAuthOk(req: express.Request): boolean {
+  if (!env.JOB_HUNT_API_TOKEN) return true;
+  const m = (req.header('authorization') ?? '').match(/^Bearer\s+(.+)$/i);
+  return m !== null && m[1].trim() === env.JOB_HUNT_API_TOKEN;
+}
+
+app.all('/mcp', async (req, res) => {
+  if (!mcpAuthOk(req)) {
+    res.status(401).json({
+      jsonrpc: '2.0',
+      error: { code: -32001, message: 'unauthorized' },
+      id: null,
+    });
+    return;
+  }
+  try {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+    });
+    res.on('close', () => transport.close().catch(() => undefined));
+    await mcpServer.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (err) {
+    logger.error({ err }, 'MCP request handling failed');
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: { code: -32603, message: 'internal_error' },
+        id: null,
+      });
+    }
+  }
+});
 
 app.use(errorHandler);
 
