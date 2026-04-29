@@ -16,20 +16,15 @@ This guide is **only** about the job-hunt API. The Indeed and Chrome MCPs are do
 
 - URL: `https://job-hunt.toastedbytes.com/mcp` (public, Cloudflare Tunnel → LAN)
 - Transport: Streamable HTTP (stateful sessions; the SDK client handles `mcp-session-id` automatically)
-- Auth: when `JOB_HUNT_API_TOKEN` is set on the server, send `Authorization: Bearer <token>`. Otherwise the endpoint is open (single-user local mode).
+- Auth: **OAuth 2.1 with Authentik** at `https://auth.toastedbytes.com`. The MCP server advertises OAuth discovery on its own URL and proxies `/authorize`, `/token`, `/revoke` to Authentik. Claude.ai's connector follows the standard `WWW-Authenticate` → resource metadata → authorization server metadata → browser OAuth flow.
 - Tools: `search_create`, `listing_get`, `listing_update`, `application_create`, `application_status_update`, `cover_letter_create`, `event_create`, `applications_list`, `application_get`, `funnel_report`, `applications_import`. They mirror the REST endpoints below — same fields, same semantics.
 
-Cowork connector config:
-```json
-{
-  "name": "job-hunt",
-  "url": "https://job-hunt.toastedbytes.com/mcp",
-  "transport": "http",
-  "headers": { "Authorization": "Bearer <JOB_HUNT_API_TOKEN>" }
-}
-```
+**Cowork setup:**
+1. Cowork → Add Connector → Custom MCP
+2. URL: `https://job-hunt.toastedbytes.com/mcp` (just the URL — no token field)
+3. Click connect → browser opens an Authentik login → log in with your Authentik account → grant consent → returned to Cowork → connector lists the 11 tools
 
-(Drop the `headers` block when running in single-user open mode.)
+A new user (housemate) just needs an Authentik account — no code changes, no server-side token. Auto-creates a `users` row in the job-hunt DB on first MCP request, keyed by their Authentik email.
 
 ### B. As a plain REST API (for shell, curl, or local Claude Code)
 
