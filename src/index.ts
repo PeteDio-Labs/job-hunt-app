@@ -20,6 +20,11 @@ import { buildOAuthRouter, verifyAuthentikAccessToken } from './mcp/oauth.ts';
 
 const app = express();
 
+// Cloudflare Tunnel sets X-Forwarded-* headers. Trust them so Express sees
+// the real client IP and so express-rate-limit (used by mcpAuthRouter) doesn't
+// throw ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+app.set('trust proxy', 1);
+
 app.use(express.json({ limit: '4mb' }));
 
 app.get('/health', async (_req, res) => {
