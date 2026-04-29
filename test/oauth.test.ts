@@ -3,7 +3,11 @@
 // We don't talk to Authentik. We generate a local RSA keypair, build a local
 // JWKS, and inject it into the SUT via _setJwksForTesting.
 
-import { describe, it, expect, beforeAll, mock } from 'bun:test';
+import { describe, it, expect, beforeAll, mock, setDefaultTimeout } from 'bun:test';
+
+// Module init (importing the SUT, mock setup, ES256 keypair gen) can run >5s
+// in cold containers — bump the per-test/hook default before anything else.
+setDefaultTimeout(30_000);
 import {
   SignJWT,
   generateKeyPair,

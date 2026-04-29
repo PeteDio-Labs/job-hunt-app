@@ -22,7 +22,11 @@ import { env } from '../lib/env.ts';
 import { logger } from '../lib/logger.ts';
 import { db } from '../db/client.ts';
 
+// Authentik: per-application paths (slug-namespaced) for discovery + JWKS,
+//            shared endpoints (no slug) for authorize/token/revoke.
+// Confirmed via /application/o/<slug>/.well-known/openid-configuration.
 const AUTHENTIK_APP_BASE = `${env.AUTHENTIK_BASE_URL}/application/o/${env.AUTHENTIK_APP_SLUG}`;
+const AUTHENTIK_OAUTH_BASE = `${env.AUTHENTIK_BASE_URL}/application/o`;
 const ISSUER = `${AUTHENTIK_APP_BASE}/`;
 const JWKS_URL = `${AUTHENTIK_APP_BASE}/jwks/`;
 
@@ -181,9 +185,9 @@ class JobHuntOAuthProvider extends ProxyOAuthServerProvider {
 
 export const oauthProvider = new JobHuntOAuthProvider({
   endpoints: {
-    authorizationUrl: `${AUTHENTIK_APP_BASE}/authorize/`,
-    tokenUrl: `${AUTHENTIK_APP_BASE}/token/`,
-    revocationUrl: `${AUTHENTIK_APP_BASE}/revoke/`,
+    authorizationUrl: `${AUTHENTIK_OAUTH_BASE}/authorize/`,
+    tokenUrl: `${AUTHENTIK_OAUTH_BASE}/token/`,
+    revocationUrl: `${AUTHENTIK_OAUTH_BASE}/revoke/`,
   },
   verifyAccessToken: verifyAuthentikAccessToken,
   // SDK requires a getClient on construction; ours is overridden by clientsStore above.
